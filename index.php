@@ -1,436 +1,264 @@
 <?php
-require_once 'includes/config.php';
-require_once 'includes/functions.php';
+require_once '../includes/config.php';
+require_once '../includes/functions.php';
 
-$page_title = __('site_title');
-
-// Banner ve özellik görsellerini getir
-$home_banner = '';
-$feature_images = [];
-
-try {
-    // Banner kontrolü
-    $banner_stmt = $pdo->prepare("SELECT setting_value FROM site_settings WHERE setting_key = 'home_banner'");
-    $banner_stmt->execute();
-    $banner_result = $banner_stmt->fetch();
-    if ($banner_result) {
-        $home_banner = $banner_result['setting_value'];
-    }
-    
-    // Özellik görsellerini getir
-    $features = ['passive_income', 'high_commission', 'secure_investment'];
-    foreach ($features as $feature) {
-        $stmt = $pdo->prepare("SELECT setting_value FROM site_settings WHERE setting_key = 'feature_$feature'");
-        $stmt->execute();
-        $result = $stmt->fetch();
-        if ($result) {
-            $feature_images[$feature] = $result['setting_value'];
-        }
-    }
-} catch (Exception $e) {
-    error_log("Index page images error: " . $e->getMessage());
+// ADMIN GİRİŞ KONTROLÜ - Eğer giriş yapılmamışsa admin login'e yönlendir
+if (!isLoggedIn()) {
+    redirect('login.php');
 }
 
-// Banner dosyasının var olup olmadığını kontrol et
-$banner_exists = false;
-if ($home_banner && file_exists($home_banner)) {
-    $banner_exists = true;
+// Eğer admin değilse ana siteye yönlendir
+if (!isAdmin()) {
+    redirect('../dashboard.php');
 }
+
+$page_title = __('admin_panel');
+$admin_page = true;
+
+// İstatistikler
+$total_users = $pdo->query("SELECT COUNT(*) FROM users WHERE role = 'user'")->fetchColumn();
+$total_gpus = $pdo->query("SELECT COUNT(*) FROM gpus")->fetchColumn();
+$total_investment = $pdo->query("SELECT SUM(amount) FROM investments WHERE status = 'approved'")->fetchColumn() ?: 0;
+$pending_approvals = $pdo->query("SELECT COUNT(*) FROM investments WHERE status = 'pending'")->fetchColumn() + 
+                     $pdo->query("SELECT COUNT(*) FROM purchases WHERE status = 'pending'")->fetchColumn();
+
+// Çekim talebi istatistikleri
+$pending_withdrawals = $pdo->query("SELECT COUNT(*) FROM withdrawals WHERE status = 'pending'")->fetchColumn();
+$total_withdrawals = $pdo->query("SELECT COUNT(*) FROM withdrawals")->fetchColumn();
+
+// Son işlemler - DÜZELTİLMİŞ SQL SORGUSU
+$stmt = $pdo->query("
+    (SELECT 'investment' as type, amount, status, investment_date as date, u.username 
+     FROM investments i JOIN users u ON i.user_id = u.id ORDER BY investment_date DESC LIMIT 5)
+    UNION
+    (SELECT 'purchase' as type, amount, status, purchase_date as date, u.username 
+     FROM purchases p JOIN users u ON p.user_id = u.id ORDER BY purchase_date DESC LIMIT 5)
+    UNION
+    (SELECT 'withdrawal' as type, amount, status, w.created_at as date, u.username 
+     FROM withdrawals w JOIN users u ON w.user_id = u.id ORDER BY w.created_at DESC LIMIT 5)
+    ORDER BY date DESC LIMIT 10
+");
+$recent_activities = $stmt->fetchAll();
 ?>
-<?php include 'includes/header.php'; ?>
+<!DOCTYPE html>
+<html lang="<?php echo $_SESSION['language']; ?>" data-theme="<?php echo getCurrentTheme(); ?>">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><?php echo $page_title; ?></title>
+    <link rel="stylesheet" href="../assets/css/style.css">
+    <link rel="stylesheet" href="../assets/css/admin.css">
+    <style>
+        /* Nav badge */
+        .nav-badge {
+            background: #e74c3c;
+            color: white;
+            border-radius: 10px;
+            padding: 2px 6px;
+            font-size: 0.7rem;
+            font-weight: bold;
+            margin-left: auto;
+        }
 
-<!-- Hero Section with Banner -->
-<section class="hero" <?php if ($banner_exists): ?>style="background: linear-gradient(rgba(0,0,0,0.6), rgba(0,0,0,0.6)), url('<?php echo $home_banner; ?>') center/cover;"<?php endif; ?>>
-    <div class="hero-content">
-        <h2><?php echo __('welcome_to_gpu_investment'); ?></h2>
-        <p><?php echo __('hero_description'); ?></p>
-        <div class="hero-buttons">
-            <?php if (!isLoggedIn()): ?>
-                <a href="register.php" class="btn btn-primary"><?php echo __('get_started'); ?></a>
-                <a href="login.php" class="btn btn-secondary"><?php echo __('login'); ?></a>
-            <?php else: ?>
-                <a href="dashboard.php" class="btn btn-primary"><?php echo __('dashboard'); ?></a>
-                <a href="buy_gpu.php" class="btn btn-secondary"><?php echo __('buy_gpu'); ?></a>
-                <?php if (isAdmin()): ?>
-                    <a href="admin/" class="btn btn-warning">Admin Panel</a>
-                <?php endif; ?>
-            <?php endif; ?>
-        </div>
-    </div>
-</section>
+        /* Action badge */
+        .action-badge {
+            background: #e74c3c;
+            color: white;
+            border-radius: 10px;
+            padding: 2px 6px;
+            font-size: 0.7rem;
+            font-weight: bold;
+            position: absolute;
+            top: -5px;
+            right: -5px;
+        }
 
-<!-- Features Section with Images -->
-<section class="features">
-    <div class="feature-grid">
-        <div class="feature-card">
-            <div class="feature-icon">
-                <?php if (isset($feature_images['passive_income']) && file_exists($feature_images['passive_income'])): ?>
-                    <img src="<?php echo $feature_images['passive_income']; ?>" alt="<?php echo __('passive_income'); ?>" 
-                         class="feature-image">
-                    <div class="feature-emoji" style="display: none;">💰</div>
-                <?php else: ?>
-                    <div class="feature-emoji">💰</div>
-                <?php endif; ?>
+        .action-card.admin {
+            position: relative;
+        }
+    </style>
+</head>
+<body>
+    <div class="admin-layout">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h2>⚡ Admin Panel</h2>
             </div>
-            <div class="feature-content">
-                <h3><?php echo __('passive_income'); ?></h3>
-                <p><?php echo __('passive_income_desc'); ?></p>
-            </div>
-        </div>
-        
-        <div class="feature-card">
-            <div class="feature-icon">
-                <?php if (isset($feature_images['high_commission']) && file_exists($feature_images['high_commission'])): ?>
-                    <img src="<?php echo $feature_images['high_commission']; ?>" alt="<?php echo __('high_commission'); ?>" 
-                         class="feature-image">
-                    <div class="feature-emoji" style="display: none;">📈</div>
-                <?php else: ?>
-                    <div class="feature-emoji">📈</div>
-                <?php endif; ?>
-            </div>
-            <div class="feature-content">
-                <h3><?php echo __('high_commission'); ?></h3>
-                <p><?php echo __('high_commission_desc'); ?></p>
-            </div>
-        </div>
-        
-        <div class="feature-card">
-            <div class="feature-icon">
-                <?php if (isset($feature_images['secure_investment']) && file_exists($feature_images['secure_investment'])): ?>
-                    <img src="<?php echo $feature_images['secure_investment']; ?>" alt="<?php echo __('secure_investment'); ?>" 
-                         class="feature-image">
-                    <div class="feature-emoji" style="display: none;">🛡️</div>
-                <?php else: ?>
-                    <div class="feature-emoji">🛡️</div>
-                <?php endif; ?>
-            </div>
-            <div class="feature-content">
-                <h3><?php echo __('secure_investment'); ?></h3>
-                <p><?php echo __('secure_investment_desc'); ?></p>
-            </div>
-        </div>
-    </div>
-</section>
+            <nav class="sidebar-nav">
+                <a href="index.php" class="nav-item active">
+                    <span class="nav-icon">📊</span>
+                    <span class="nav-text">Dashboard</span>
+                </a>
+                <a href="users.php" class="nav-item">
+                    <span class="nav-icon">👥</span>
+                    <span class="nav-text">Kullanıcılar</span>
+                </a>
+                <a href="gpus.php" class="nav-item">
+                    <span class="nav-icon">🖥️</span>
+                    <span class="nav-text">Ekran Kartları</span>
+                </a>
+                <a href="investments.php" class="nav-item">
+                    <span class="nav-icon">💰</span>
+                    <span class="nav-text">Yatırımlar</span>
+                </a>
+                <a href="withdrawals.php" class="nav-item">
+                    <span class="nav-icon">📤</span>
+                    <span class="nav-text">Çekim Talepleri</span>
+                    <?php if ($pending_withdrawals > 0): ?>
+                        <span class="nav-badge"><?php echo $pending_withdrawals; ?></span>
+                    <?php endif; ?>
+                </a>
+                <a href="commissions.php" class="nav-item">
+                    <span class="nav-icon">📈</span>
+                    <span class="nav-text">Komisyonlar</span>
+                </a>
+                <a href="payment_methods.php" class="nav-item">
+                    <span class="nav-icon">💳</span>
+                    <span class="nav-text">Ödeme Yöntemleri</span>
+                </a>
+                <a href="settings.php" class="nav-item">
+                    <span class="nav-icon">⚙️</span>
+                    <span class="nav-text">Ayarlar</span>
+                </a>
+                <a href="../dashboard.php" class="nav-item">
+                    <span class="nav-icon">🏠</span>
+                    <span class="nav-text">Siteye Dön</span>
+                </a>
+            </nav>
+        </aside>
 
-<!-- GPU List Section (Mevcut kısım aynı kalacak) -->
-<section class="gpu-list">
-    <h2><?php echo __('available_gpus'); ?></h2>
-    <div class="gpu-grid">
-        <?php
-        $gpus = getGPUs();
-        foreach ($gpus as $gpu): 
-            $dailyEarning = calculateDailyEarning($gpu['monthly_income']);
-        ?>
-            <div class="gpu-card">
-                <img src="<?php echo $gpu['image_path'] ?: 'assets/images/default-gpu.jpg'; ?>" 
-                     alt="<?php echo $gpu['name']; ?>" 
-                     class="gpu-image">
-                <div class="gpu-info">
-                    <h3><?php echo $gpu['name']; ?></h3>
-                    <div class="gpu-details">
-                        <div class="detail-item">
-                            <span class="label"><?php echo __('gpu_price'); ?>:</span>
-                            <span class="value"><?php echo formatPrice($gpu['price']); ?></span>
+        <!-- Main Content -->
+        <main class="admin-main">
+            <header class="admin-header">
+                <h1>Admin Dashboard</h1>
+                <div class="admin-actions">
+                    <span>Hoş geldiniz, <strong><?php echo $_SESSION['username']; ?></strong> (Admin)</span>
+                    <a href="../includes/logout.php" class="btn btn-sm btn-danger">Çıkış Yap</a>
+                </div>
+            </header>
+
+            <div class="admin-content">
+                <!-- İstatistik Kartları -->
+                <div class="stats-grid admin">
+                    <div class="stat-card admin">
+                        <div class="stat-icon">👥</div>
+                        <div class="stat-info">
+                            <h3>Toplam Kullanıcı</h3>
+                            <p class="stat-value"><?php echo $total_users; ?></p>
                         </div>
-                        <div class="detail-item">
-                            <span class="label"><?php echo __('monthly_income'); ?>:</span>
-                            <span class="value"><?php echo formatPrice($gpu['monthly_income']); ?></span>
+                    </div>
+                    
+                    <div class="stat-card admin">
+                        <div class="stat-icon">🖥️</div>
+                        <div class="stat-info">
+                            <h3>Toplam GPU</h3>
+                            <p class="stat-value"><?php echo $total_gpus; ?></p>
                         </div>
-                        <div class="detail-item">
-                            <span class="label"><?php echo __('daily_income'); ?>:</span>
-                            <span class="value"><?php echo formatPrice($dailyEarning); ?></span>
+                    </div>
+                    
+                    <div class="stat-card admin">
+                        <div class="stat-icon">💰</div>
+                        <div class="stat-info">
+                            <h3>Toplam Yatırım</h3>
+                            <p class="stat-value"><?php echo formatPrice($total_investment); ?></p>
                         </div>
-                        <div class="detail-item">
-                            <span class="label"><?php echo __('commission_rate'); ?>:</span>
-                            <span class="value">%<?php echo $gpu['commission_rate']; ?></span>
+                    </div>
+                    
+                    <div class="stat-card admin">
+                        <div class="stat-icon">📤</div>
+                        <div class="stat-info">
+                            <h3>Bekleyen Çekimler</h3>
+                            <p class="stat-value"><?php echo $pending_withdrawals; ?></p>
+                            <small>Toplam: <?php echo $total_withdrawals; ?> çekim</small>
                         </div>
                     </div>
                 </div>
-                <?php if (isLoggedIn()): ?>
-                    <a href="gpu_detail.php?id=<?php echo $gpu['id']; ?>" class="btn btn-primary">
-                        <?php echo __('view_details'); ?>
-                    </a>
-                <?php else: ?>
-                    <a href="login.php" class="btn btn-primary">
-                        <?php echo __('buy_gpu'); ?>
-                    </a>
-                <?php endif; ?>
+
+                <!-- Son Aktiviteler -->
+                <div class="content-row">
+                    <div class="content-col full">
+                        <div class="content-card">
+                            <h3>Son Aktiviteler</h3>
+                            <?php if (empty($recent_activities)): ?>
+                                <p class="no-data">Henüz aktivite bulunmuyor</p>
+                            <?php else: ?>
+                                <div class="activity-list">
+                                    <?php foreach ($recent_activities as $activity): ?>
+                                        <div class="activity-item">
+                                            <div class="activity-icon">
+                                                <?php 
+                                                switch($activity['type']) {
+                                                    case 'investment': echo '💰'; break;
+                                                    case 'purchase': echo '🖥️'; break;
+                                                    case 'withdrawal': echo '📤'; break;
+                                                    default: echo '📄';
+                                                }
+                                                ?>
+                                            </div>
+                                            <div class="activity-info">
+                                                <div class="activity-main">
+                                                    <strong><?php echo $activity['username']; ?></strong>
+                                                    <?php 
+                                                    switch($activity['type']) {
+                                                        case 'investment': echo ' yatırım yaptı'; break;
+                                                        case 'purchase': echo ' ekran kartı satın aldı'; break;
+                                                        case 'withdrawal': echo ' para çekme talebi oluşturdu'; break;
+                                                    }
+                                                    ?>
+                                                    <strong><?php echo formatPrice($activity['amount']); ?></strong>
+                                                </div>
+                                                <div class="activity-meta">
+                                                    <span class="activity-date"><?php echo date('d.m.Y H:i', strtotime($activity['date'])); ?></span>
+                                                    <span class="activity-status status-<?php echo $activity['status']; ?>">
+                                                        <?php 
+                                                        switch($activity['status']) {
+                                                            case 'pending': echo 'Beklemede'; break;
+                                                            case 'approved': echo 'Onaylandı'; break;
+                                                            case 'rejected': echo 'Reddedildi'; break;
+                                                            default: echo $activity['status'];
+                                                        }
+                                                        ?>
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    <?php endforeach; ?>
+                                </div>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Hızlı İşlemler -->
+                <div class="quick-actions admin">
+                    <h3>Hızlı İşlemler</h3>
+                    <div class="action-grid admin">
+                        <a href="users.php?action=add" class="action-card admin">
+                            <div class="action-icon">➕</div>
+                            <span>Kullanıcı Ekle</span>
+                        </a>
+                        <a href="gpus.php?action=add" class="action-card admin">
+                            <div class="action-icon">🖥️</div>
+                            <span>GPU Ekle</span>
+                        </a>
+                        <a href="investments.php" class="action-card admin">
+                            <div class="action-icon">✅</div>
+                            <span>Yatırımları Onayla</span>
+                        </a>
+                        <a href="withdrawals.php" class="action-card admin">
+                            <div class="action-icon">📤</div>
+                            <span>Çekim Talepleri</span>
+                            <?php if ($pending_withdrawals > 0): ?>
+                                <span class="action-badge"><?php echo $pending_withdrawals; ?></span>
+                            <?php endif; ?>
+                        </a>
+                    </div>
+                </div>
             </div>
-        <?php endforeach; ?>
+        </main>
     </div>
-</section>
 
-<style>
-/* Hero Section with Banner */
-.hero {
-    padding: 100px 0;
-    text-align: center;
-    color: white;
-    position: relative;
-    <?php if (!$banner_exists): ?>
-    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
-    <?php endif; ?>
-}
-
-.hero-content {
-    position: relative;
-    z-index: 2;
-    max-width: 800px;
-    margin: 0 auto;
-    padding: 0 20px;
-}
-
-.hero-content h2 {
-    font-size: 3rem;
-    margin-bottom: 1rem;
-    font-weight: 700;
-    text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
-}
-
-.hero-content p {
-    font-size: 1.2rem;
-    margin-bottom: 2rem;
-    opacity: 0.9;
-    text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
-}
-
-.hero-buttons {
-    display: flex;
-    gap: 1rem;
-    justify-content: center;
-    flex-wrap: wrap;
-}
-
-/* Features Section */
-.features {
-    padding: 80px 0;
-    background: var(--bg-color);
-}
-
-.feature-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-    gap: 2rem;
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 0 20px;
-}
-
-.feature-card {
-    background: var(--card-bg);
-    padding: 0; /* Padding'i kaldırdık, içerik kendi padding'ine sahip olacak */
-    border-radius: 12px;
-    text-align: center;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-    transition: transform 0.3s ease, box-shadow 0.3s ease;
-    border: 1px solid var(--border-color);
-    overflow: hidden; /* Görsellerin köşeleri yuvarlak olsun */
-    display: flex;
-    flex-direction: column;
-    height: 100%; /* Tüm kartlar aynı yükseklikte */
-}
-
-.feature-card:hover {
-    transform: translateY(-5px);
-    box-shadow: 0 8px 25px rgba(0,0,0,0.15);
-}
-
-.feature-icon {
-    margin-bottom: 0; /* Margin'i kaldırdık */
-    height: 200px; /* Sabit yükseklik */
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); /* Görsel yoksa gradient */
-    position: relative;
-    overflow: hidden;
-}
-
-.feature-image {
-    width: 100%; /* Kutu genişliğini tam doldur */
-    height: 100%; /* Kutu yüksekliğini tam doldur */
-    object-fit: cover; /* Görseli kutuya sığdır, keserek tam doldur */
-    object-position: center; /* Görseli ortala */
-    display: block;
-}
-
-.feature-emoji {
-    font-size: 4rem;
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    z-index: 1;
-    background: rgba(255,255,255,0.9);
-    width: 80px;
-    height: 80px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-}
-
-.feature-content {
-    padding: 2rem; /* İçerik için padding */
-    flex: 1; /* İçeriğin kalan alanı doldurmasını sağla */
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-}
-
-.feature-card h3 {
-    font-size: 1.5rem;
-    margin-bottom: 1rem;
-    color: var(--text-color);
-    font-weight: 600;
-}
-
-.feature-card p {
-    color: var(--text-color);
-    opacity: 0.8;
-    line-height: 1.6;
-    margin: 0;
-}
-
-/* GPU List Section */
-.gpu-list {
-    padding: 80px 0;
-}
-
-.gpu-list h2 {
-    text-align: center;
-    font-size: 2.5rem;
-    margin-bottom: 3rem;
-    color: var(--text-color);
-}
-
-.gpu-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-    gap: 2rem;
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 0 20px;
-}
-
-.gpu-card {
-    background: var(--card-bg);
-    border-radius: 12px;
-    overflow: hidden;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-    transition: transform 0.3s ease;
-    border: 1px solid var(--border-color);
-}
-
-.gpu-card:hover {
-    transform: translateY(-5px);
-}
-
-.gpu-image {
-    width: 100%;
-    height: 200px;
-    object-fit: cover;
-}
-
-.gpu-info {
-    padding: 1.5rem;
-}
-
-.gpu-info h3 {
-    margin: 0 0 1rem 0;
-    color: var(--text-color);
-    font-size: 1.3rem;
-}
-
-.gpu-details {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    margin-bottom: 1.5rem;
-}
-
-.detail-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 0.5rem 0;
-    border-bottom: 1px solid var(--border-color);
-}
-
-.detail-item:last-child {
-    border-bottom: none;
-}
-
-.detail-item .label {
-    color: var(--text-color);
-    opacity: 0.8;
-}
-
-.detail-item .value {
-    font-weight: 600;
-    color: var(--text-color);
-}
-
-.gpu-card .btn {
-    margin: 0 1.5rem 1.5rem;
-    width: calc(100% - 3rem);
-}
-
-/* Responsive Tasarım */
-@media (max-width: 768px) {
-    .hero-content h2 {
-        font-size: 2rem;
-    }
-    
-    .hero-content p {
-        font-size: 1rem;
-    }
-    
-    .hero-buttons {
-        flex-direction: column;
-        align-items: center;
-    }
-    
-    .hero-buttons .btn {
-        width: 200px;
-    }
-    
-    .feature-grid {
-        grid-template-columns: 1fr;
-        gap: 1.5rem;
-    }
-    
-    .feature-card {
-        padding: 1.5rem;
-    }
-    
-    .gpu-grid {
-        grid-template-columns: 1fr;
-    }
-}
-
-@media (max-width: 480px) {
-    .hero {
-        padding: 60px 0;
-    }
-    
-    .hero-content h2 {
-        font-size: 1.8rem;
-    }
-    
-    .features {
-        padding: 60px 0;
-    }
-    
-    .gpu-list {
-        padding: 60px 0;
-    }
-    
-    .gpu-list h2 {
-        font-size: 2rem;
-    }
-}
-</style>
-
-<?php include 'includes/footer.php'; ?>
+    <script src="../assets/js/admin.js"></script>
+</body>
+</html>

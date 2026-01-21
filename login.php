@@ -1,205 +1,228 @@
 <?php
-// Hata raporlama
-error_reporting(E_ALL);
-ini_set('display_errors', 1);
+require_once '../includes/config.php';
+require_once '../includes/functions.php';
 
-require_once 'includes/config.php';
-require_once 'includes/functions.php';
-require_once 'includes/auth.php';
+// Eğer zaten giriş yapmış ve admin ise admin panele yönlendir
+if (isLoggedIn() && isAdmin()) {
+    redirect('index.php');
+}
 
-// Basit auth kontrolü
-if (isLoggedIn()) {
-    header('Location: dashboard.php');
-    exit;
+// Eğer giriş yapmış ama admin değilse dashboard'a yönlendir
+if (isLoggedIn() && !isAdmin()) {
+    redirect('../dashboard.php');
 }
 
 $error = '';
-
-// Gelişmiş login işlemi
 if ($_POST) {
-    $username_or_email = $_POST['username_or_email'] ?? '';
-    $password = $_POST['password'] ?? '';
+    $username = trim($_POST['username']);
+    $password = $_POST['password'];
     
-    // Debug
-    error_log("Login attempt: $username_or_email");
+    // Debug için
+    error_log("Login attempt: " . $username);
     
-    // Kullanıcıyı veritabanında ara (username veya email ile)
-    try {
-        $stmt = $pdo->prepare("SELECT * FROM users WHERE username = ? OR email = ?");
-        $stmt->execute([$username_or_email, $username_or_email]);
-        $user = $stmt->fetch();
+    // Admin giriş kontrolü
+    global $pdo;
+    $stmt = $pdo->prepare("SELECT * FROM users WHERE (username = ? OR email = ?) AND role = 'admin'");
+    $stmt->execute([$username, $username]);
+    $admin = $stmt->fetch();
+    
+    if ($admin) {
+        error_log("Admin found: " . $admin['username']);
+        error_log("Stored hash: " . $admin['password']);
+        error_log("Input password: " . $password);
         
-        if ($user) {
-            // E-posta doğrulama kontrolü
-            if (defined('EMAIL_VERIFICATION_REQUIRED') && EMAIL_VERIFICATION_REQUIRED && !$user['email_verified']) {
-                $error = 'Hesabınızı kullanabilmek için önce e-posta adresinizi doğrulamanız gerekiyor!<br>E-postanızı kontrol edin veya <a href="resend_verification.php" style="color: #3498db;">doğrulama e-postasını yeniden gönderin</a>.';
-            } elseif (password_verify($password, $user['password'])) {
-                // Giriş başarılı
-                $_SESSION['user_id'] = $user['id'];
-                $_SESSION['username'] = $user['username'];
-                $_SESSION['email'] = $user['email'];
-                $_SESSION['role'] = $user['role'];
-                $_SESSION['theme'] = $user['theme'];
-                
-                // Son giriş zamanını güncelle
-                $update_stmt = $pdo->prepare("UPDATE users SET last_login = NOW() WHERE id = ?");
-                $update_stmt->execute([$user['id']]);
-                
-                header('Location: dashboard.php');
-                exit;
-            } else {
-                $error = 'Şifre hatalı!';
-            }
+        // Şifre kontrolü
+        if (password_verify($password, $admin['password'])) {
+            error_log("Password verified successfully");
+            
+            $_SESSION['user_id'] = $admin['id'];
+            $_SESSION['username'] = $admin['username'];
+            $_SESSION['email'] = $admin['email'];
+            $_SESSION['role'] = $admin['role'];
+            $_SESSION['theme'] = $admin['theme'];
+            
+            redirect('index.php');
         } else {
-            $error = 'Kullanıcı adı veya e-posta bulunamadı!';
+            error_log("Password verification failed");
+            $error = 'Şifre hatalı!';
         }
-    } catch (Exception $e) {
-        error_log("Login error: " . $e->getMessage());
-        $error = 'Giriş sırasında bir hata oluştu!';
+    } else {
+        error_log("Admin not found for: " . $username);
+        $error = 'Admin kullanıcı adı bulunamadı!';
     }
 }
 ?>
-
 <!DOCTYPE html>
 <html lang="tr">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Giriş Yap - GPU Invest</title>
+    <title>Admin Giriş - GPU Invest</title>
+    <link rel="stylesheet" href="../assets/css/style.css">
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
+        .admin-login-container {
             display: flex;
-            align-items: center;
             justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         }
-        .login-form {
+        
+        .admin-login-form {
             background: white;
-            padding: 2rem;
-            border-radius: 10px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            padding: 3rem;
+            border-radius: 15px;
+            box-shadow: 0 15px 35px rgba(0,0,0,0.1);
             width: 100%;
             max-width: 400px;
-        }
-        .login-form h2 {
             text-align: center;
-            margin-bottom: 1.5rem;
+        }
+        
+        .admin-login-form h2 {
             color: #333;
+            margin-bottom: 1.5rem;
+            font-size: 1.8rem;
+            font-weight: 600;
         }
-        .form-group {
+        
+        .admin-logo {
+            font-size: 3rem;
             margin-bottom: 1rem;
+            color: #667eea;
         }
-        .form-group label {
+        
+        .admin-login-form .form-group {
+            margin-bottom: 1.5rem;
+            text-align: left;
+        }
+        
+        .admin-login-form label {
             display: block;
             margin-bottom: 0.5rem;
             color: #555;
+            font-weight: 500;
         }
-        .form-group input {
+        
+        .admin-login-form input {
             width: 100%;
-            padding: 10px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
+            padding: 12px 15px;
+            border: 2px solid #e1e5e9;
+            border-radius: 8px;
             font-size: 1rem;
+            transition: all 0.3s ease;
+            font-family: inherit;
         }
-        .btn {
+        
+        .admin-login-form input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        .admin-login-btn {
             width: 100%;
             padding: 12px;
-            background: #3498db;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             border: none;
-            border-radius: 5px;
+            border-radius: 8px;
             font-size: 1rem;
+            font-weight: 600;
             cursor: pointer;
+            transition: all 0.3s ease;
+            font-family: inherit;
         }
-        .btn:hover {
-            background: #2980b9;
+        
+        .admin-login-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
         }
-        .demo-accounts {
-            margin-top: 1.5rem;
-            padding: 1rem;
-            background: #f8f9fa;
-            border-radius: 5px;
-            font-size: 0.9rem;
-        }
+        
         .error-message {
             background: #fee;
             color: #c33;
-            padding: 10px;
-            border-radius: 5px;
+            padding: 12px;
+            border-radius: 8px;
             margin-bottom: 1rem;
-            text-align: center;
+            border: 1px solid #fcc;
+            font-weight: 500;
         }
-        .error-message a {
-            color: #3498db;
-            text-decoration: none;
-        }
-        .error-message a:hover {
-            text-decoration: underline;
-        }
-        .auth-link {
-            text-align: center;
-            margin-top: 1rem;
-        }
-        .auth-link a {
-            color: #3498db;
-            text-decoration: none;
-        }
-        .auth-link a:hover {
-            text-decoration: underline;
-        }
-        .password-reset-link {
-            text-align: center;
-            margin-top: 0.5rem;
-        }
-        .password-reset-link a {
+        
+        .back-to-site {
+            margin-top: 1.5rem;
             color: #666;
+        }
+        
+        .back-to-site a {
+            color: #667eea;
             text-decoration: none;
+            font-weight: 500;
+            transition: color 0.3s;
+        }
+        
+        .back-to-site a:hover {
+            color: #764ba2;
+            text-decoration: underline;
+        }
+        
+        .demo-info {
+            background: #f8f9fa;
+            padding: 1.5rem;
+            border-radius: 8px;
+            margin-top: 1.5rem;
+            border-left: 4px solid #667eea;
+        }
+        
+        .demo-info h4 {
+            margin: 0 0 0.5rem 0;
+            color: #333;
+            font-size: 1rem;
+        }
+        
+        .demo-info p {
+            margin: 0.25rem 0;
+            color: #666;
             font-size: 0.9rem;
         }
-        .password-reset-link a:hover {
-            color: #3498db;
-            text-decoration: underline;
+        
+        .demo-info strong {
+            color: #333;
         }
     </style>
 </head>
 <body>
-    <div class="login-form">
-        <h2>Giriş Yap</h2>
-        
-        <?php if (!empty($error)): ?>
-            <div class="error-message">
-                <?php echo $error; ?>
+    <div class="admin-login-container">
+        <div class="admin-login-form">
+            <div class="admin-logo">⚡</div>
+            <h2>Admin Giriş Paneli</h2>
+            
+            <?php if ($error): ?>
+                <div class="error-message">
+                    <?php echo $error; ?>
+                </div>
+            <?php endif; ?>
+            
+            <form method="POST">
+                <div class="form-group">
+                    <label for="username">Kullanıcı Adı:</label>
+                    <input type="text" id="username" name="username" required placeholder="Admin kullanıcı adınız" value="<?php echo isset($_POST['username']) ? htmlspecialchars($_POST['username']) : ''; ?>">
+                </div>
+                
+                <div class="form-group">
+                    <label for="password">Şifre:</label>
+                    <input type="password" id="password" name="password" required placeholder="Admin şifreniz">
+                </div>
+                
+                <button type="submit" class="admin-login-btn">Admin Girişi Yap</button>
+            </form>
+            
+            
+            
+            <div class="back-to-site">
+                <a href="../index.php">← Siteye Dön</a>
             </div>
-        <?php endif; ?>
-        
-        <form method="POST">
-            <div class="form-group">
-                <label>Kullanıcı Adı veya E-posta:</label>
-                <input type="text" name="username_or_email" required 
-                       placeholder="Kullanıcı adınız veya e-posta adresiniz"
-                       value="<?php echo htmlspecialchars($_POST['username_or_email'] ?? ''); ?>">
-            </div>
-            <div class="form-group">
-                <label>Şifre:</label>
-                <input type="password" name="password" required 
-                       placeholder="Şifreniz">
-            </div>
-            <button type="submit" class="btn">Giriş Yap</button>
-        </form>
-        
-        <div class="password-reset-link">
-            <a href="forgot_password.php">Şifremi Unuttum</a>
         </div>
-        
-        <div class="auth-link">
-            <p>Hesabınız yok mu? <a href="register.php">Kayıt Olun</a></p>
-        </div>
-        
-        <p style="text-align: center; margin-top: 1rem;">
-            <a href="index.php">← Ana Sayfaya Dön</a>
-        </p>
     </div>
 </body>
 </html>
