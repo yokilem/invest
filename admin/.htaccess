@@ -1,0 +1,8 @@
+# Admin klasörüne doğrudan erişimi engelle
+RewriteEngine On
+
+# Eğer admin giriş yapmamışsa login sayfasına yönlendir
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteCond %{REQUEST_FILENAME} !-l
+RewriteRule ^(?!login\.php).*$ login.php [L,NC]
